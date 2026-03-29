@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>意图驱动的 P4 测试系统</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e4e4e7;
+    --dim: #71717a;
+    --accent: #6366f1;
+    --accent-hover: #818cf8;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --blue: #3b82f6;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+    min-height: 100vh;
+  }
+  header {
+    padding: 20px 32px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px;
+  }
+  header h1 { font-size: 20px; font-weight: 600; }
+  header .tag {
+    font-size: 12px; padding: 2px 8px; border-radius: 4px;
+    background: var(--accent); color: #fff;
+  }
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px 32px; }
+  .section {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px 24px; margin-bottom: 20px;
+  }
+  .section-title {
+    font-size: 14px; font-weight: 600; color: var(--dim); text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 14px;
+  }
+  select, textarea {
+    width: 100%; padding: 10px 14px; border-radius: var(--radius);
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+    font-size: 14px; font-family: inherit; resize: vertical;
+  }
+  select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  textarea { min-height: 80px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 20px; border-radius: var(--radius);
+    border: none; font-size: 14px; font-weight: 500; cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary { background: var(--border); color: var(--text); }
+  .btn-secondary:hover { background: #3a3d4a; }
+  .btn-group { display: flex; gap: 10px; margin-top: 14px; }
+  .spec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .spec-box {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; min-height: 100px;
+  }
+  .spec-box label { font-size: 12px; color: var(--dim); display: block; margin-bottom: 6px; }
+  .spec-box pre { font-size: 13px; white-space: pre-wrap; word-break: break-all; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;
+  }
+  .badge-pass { background: rgba(34,197,94,0.15); color: var(--green); }
+  .badge-fail { background: rgba(239,68,68,0.15); color: var(--red); }
+  .badge-warn { background: rgba(234,179,8,0.15); color: var(--yellow); }
+  .badge-info { background: rgba(59,130,246,0.15); color: var(--blue); }
+  .validation-row { display: flex; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+  .validation-item { font-size: 13px; }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px;
+  }
+  th { text-align: left; padding: 8px 10px; border-bottom: 2px solid var(--border); color: var(--dim); font-weight: 500; }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .scenario-block {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .scenario-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .scenario-header h4 { font-size: 14px; }
+  .step-log {
+    font-family: "SF Mono", "Fira Code", monospace; font-size: 12px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 16px; max-height: 300px; overflow-y: auto;
+  }
+  .step-line { padding: 2px 0; }
+  .step-line .action { color: var(--accent); }
+  .step-line .done { color: var(--green); }
+  .step-line .error { color: var(--red); }
+  .spinner {
+    display: inline-block; width: 16px; height: 16px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .verdict-box { padding: 16px; border-radius: var(--radius); margin-top: 12px; }
+  .verdict-pass { background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.3); }
+  .verdict-fail { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3); }
+  .hidden { display: none; }
+  .taskid { font-family: monospace; font-size: 12px; color: var(--dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>意图驱动的 P4 测试系统</h1>
+  <span class="tag">v1.0</span>
+  <span id="taskIdDisplay" class="taskid"></span>
+</header>
+
+<div class="container">
+
+  <!-- Section 1: Input -->
+  <div class="section" id="inputSection">
+    <div class="section-title">① 输入测试意图</div>
+    <select id="caseSelect">
+      <option value="">加载中...</option>
+    </select>
+    <textarea id="intentText" placeholder="选择用例后自动填充，也可以手动编辑..." style="margin-top:12px;"></textarea>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="btnGenSpec" onclick="generateSpec()">生成 P4LTL 规范</button>
+    </div>
+  </div>
+
+  <!-- Section 2: Spec -->
+  <div class="section hidden" id="specSection">
+    <div class="section-title">② 规范生成结果</div>
+    <div class="spec-grid">
+      <div class="spec-box">
+        <label>原始意图</label>
+        <pre id="specIntent"></pre>
+      </div>
+      <div class="spec-box">
+        <label>P4LTL 规范</label>
+        <pre id="specText" style="color:var(--accent);"></pre>
+      </div>
+    </div>
+    <div class="validation-row" id="specValidation"></div>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="btnGenTC" onclick="generateTestcases()">生成测试用例</button>
+      <button class="btn btn-secondary" onclick="copySpec()">复制规范</button>
+    </div>
+  </div>
+
+  <!-- Section 3: Test Cases -->
+  <div class="section hidden" id="tcSection">
+    <div class="section-title">③ 测试用例</div>
+    <div id="tcContent"></div>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="btnRunTest" onclick="runAutoTest()">执行自动测试</button>
+      <button class="btn btn-secondary" onclick="exportTestcases()">导出 JSON</button>
+    </div>
+  </div>
+
+  <!-- Section 4: Test Execution & Result -->
+  <div class="section hidden" id="testSection">
+    <div class="section-title">④ 自动测试执行与结果</div>
+    <div id="testProgress" class="step-log"></div>
+    <div id="testVerdict"></div>
+  </div>
+
+</div>
+
+<script>
+let currentTaskId = null;
+let currentTask = null;
+
+// ---- Init ----
+async function init() {
+  const resp = await fetch('/api/programs');
+  const cases = await resp.json();
+  const sel = document.getElementById('caseSelect');
+  sel.innerHTML = '<option value="">— 请选择测试用例 —</option>';
+  cases.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.case_id;
+    opt.textContent = `[${c.program_name}] ${c.intent.substring(0, 70)}${c.intent.length > 70 ? '...' : ''}`;
+    opt.dataset.intent = c.intent;
+    sel.appendChild(opt);
+  });
+  sel.onchange = () => {
+    const opt = sel.selectedOptions[0];
+    if (opt && opt.dataset.intent) {
+      document.getElementById('intentText').value = opt.dataset.intent;
+    }
+  };
+}
+
+// ---- Stage 1: Spec ----
+async function generateSpec() {
+  const caseId = document.getElementById('caseSelect').value;
+  const intent = document.getElementById('intentText').value.trim();
+  if (!caseId) { alert('请先选择测试用例'); return; }
+
+  setBtnLoading('btnGenSpec', true);
+  try {
+    const resp = await fetch('/api/spec/generate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({case_id: caseId, intent_override: intent || null}),
+    });
+    const task = await resp.json();
+    currentTaskId = task.task_id;
+    currentTask = task;
+    document.getElementById('taskIdDisplay').textContent = `Task: ${task.task_id}`;
+    showSpecResult(task);
+  } catch (e) {
+    alert('规范生成失败: ' + e.message);
+  }
+  setBtnLoading('btnGenSpec', false);
+}
+
+function showSpecResult(task) {
+  document.getElementById('specSection').classList.remove('hidden');
+  document.getElementById('specIntent').textContent = task.natural_language_intent;
+  document.getElementById('specText').textContent = task.ltl_spec_text || '(未生成)';
+
+  const vRow = document.getElementById('specValidation');
+  vRow.innerHTML = '';
+
+  if (task.spec_generation_ok === true) {
+    vRow.innerHTML += '<span class="badge badge-pass">✓ 生成成功</span>';
+  } else if (task.spec_generation_ok === false) {
+    vRow.innerHTML += '<span class="badge badge-warn">⚠ 未完全通过</span>';
+  }
+
+  const detail = task.spec_generation_detail || {};
+  if (detail.ok !== undefined) {
+    // try to extract validation from full detail (if available via task endpoint)
+  }
+}
+
+// ---- Stage 2: Testcases ----
+async function generateTestcases() {
+  if (!currentTaskId) return;
+  setBtnLoading('btnGenTC', true);
+  try {
+    const resp = await fetch('/api/testcase/generate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({task_id: currentTaskId}),
+    });
+    const task = await resp.json();
+    currentTask = task;
+    showTestcases(task);
+  } catch (e) {
+    alert('测试用例生成失败: ' + e.message);
+  }
+  setBtnLoading('btnGenTC', false);
+}
+
+function showTestcases(task) {
+  const sec = document.getElementById('tcSection');
+  sec.classList.remove('hidden');
+  const content = document.getElementById('tcContent');
+
+  const tcs = task.testcases || [];
+  if (tcs.length === 0) {
+    content.innerHTML = '<p style="color:var(--red);">未生成任何测试用例</p>';
+    return;
+  }
+
+  let html = `<p style="margin-bottom:12px;"><span class="badge badge-pass">✓ 共 ${tcs.length} 个场景</span></p>`;
+
+  tcs.forEach((tc, i) => {
+    const meta = tc.meta || {};
+    const scenario = meta.scenario || tc.task_id || `scenario_${i+1}`;
+    const kind = meta.scenario_kind || '';
+    const pkts = tc.packet_sequence || [];
+    const entities = tc.entities || [];
+    const oracle = tc.oracle_prediction || {};
+    const preds = oracle.packet_predictions || [];
+
+    html += `<div class="scenario-block">`;
+    html += `<div class="scenario-header"><h4>场景 ${i+1}: ${esc(scenario)}</h4>`;
+    if (kind) html += `<span class="badge ${kind==='positive'?'badge-pass':'badge-fail'}">${kind}</span>`;
+    html += `</div>`;
+
+    // Packets table
+    if (pkts.length) {
+      html += `<table><tr><th>#</th><th>发送主机</th><th>协议</th><th>目的IP</th><th>TCP Flags</th></tr>`;
+      pkts.forEach(p => {
+        const f = p.fields || {};
+        html += `<tr><td>${p.packet_id||''}</td><td>${p.tx_host||''}</td>`;
+        html += `<td>${(p.protocol_stack||[]).join(' / ')}</td>`;
+        html += `<td>${f['IPv4.dst']||''}</td><td>${f['TCP.flags']||''}</td></tr>`;
+      });
+      html += `</table>`;
+    }
+
+    // Oracle predictions
+    if (preds.length) {
+      html += `<div style="margin-top:8px;font-size:13px;color:var(--dim);">Oracle 预测:</div>`;
+      html += `<table><tr><th>Packet</th><th>预期</th><th>接收主机</th></tr>`;
+      preds.forEach(pr => {
+        const color = pr.expected_outcome === 'deliver' ? 'var(--green)' : 'var(--red)';
+        html += `<tr><td>#${pr.packet_id||''}</td>`;
+        html += `<td style="color:${color}">${pr.expected_outcome||''}</td>`;
+        html += `<td>${pr.expected_rx_host||'—'}</td></tr>`;
+      });
+      html += `</table>`;
+    }
+
+    html += `</div>`;
+  });
+
+  content.innerHTML = html;
+}
+
+// ---- Stage 3+4: Auto Test ----
+async function runAutoTest() {
+  if (!currentTaskId) return;
+  setBtnLoading('btnRunTest', true);
+  const sec = document.getElementById('testSection');
+  sec.classList.remove('hidden');
+  const progress = document.getElementById('testProgress');
+  progress.innerHTML = '<div class="step-line"><span class="spinner"></span> 正在启动自动测试...</div>';
+
+  try {
+    await fetch('/api/test/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({task_id: currentTaskId}),
+    });
+
+    const evtSource = new EventSource(`/api/test/stream/${currentTaskId}`);
+    evtSource.addEventListener('step', (e) => {
+      const step = JSON.parse(e.data);
+      const statusClass = step.status === 'done' ? 'done' : (step.status === 'error' ? 'error' : '');
+      const line = `<div class="step-line">[${step.step_id}] <span class="action">${esc(step.action || step.thought?.substring(0,60) || '...')}</span> <span class="${statusClass}">${step.status}</span></div>`;
+      progress.innerHTML += line;
+      progress.scrollTop = progress.scrollHeight;
+    });
+    evtSource.addEventListener('complete', (e) => {
+      evtSource.close();
+      const task = JSON.parse(e.data);
+      currentTask = task;
+      showVerdict(task);
+      setBtnLoading('btnRunTest', false);
+    });
+    evtSource.addEventListener('error', (e) => {
+      evtSource.close();
+      progress.innerHTML += '<div class="step-line error">连接中断</div>';
+      setBtnLoading('btnRunTest', false);
+    });
+  } catch (e) {
+    progress.innerHTML += `<div class="step-line error">失败: ${esc(e.message)}</div>`;
+    setBtnLoading('btnRunTest', false);
+  }
+}
+
+function showVerdict(task) {
+  const div = document.getElementById('testVerdict');
+  const v = task.test_verdict;
+  if (!v) {
+    div.innerHTML = '<p style="color:var(--dim);">无判定结果</p>';
+    return;
+  }
+  const cls = v.overall === 'PASS' ? 'verdict-pass' : 'verdict-fail';
+  const color = v.overall === 'PASS' ? 'var(--green)' : (v.overall === 'FAIL' ? 'var(--red)' : 'var(--yellow)');
+  let html = `<div class="verdict-box ${cls}">`;
+  html += `<h3 style="color:${color};margin-bottom:8px;">测试结论: ${v.overall}</h3>`;
+
+  if (v.per_packet && v.per_packet.length) {
+    html += `<table><tr><th>Packet</th><th>预期</th><th>实际</th><th>结果</th></tr>`;
+    v.per_packet.forEach(pv => {
+      const icon = pv.match ? '✓' : '✗';
+      const c = pv.match ? 'var(--green)' : 'var(--red)';
+      html += `<tr><td>#${pv.packet_id}</td><td>${esc(pv.expected_outcome)}</td>`;
+      html += `<td>${esc(pv.actual_outcome)}</td><td style="color:${c}">${icon}</td></tr>`;
+    });
+    html += `</table>`;
+  }
+
+  if (v.reasoning) {
+    html += `<p style="margin-top:10px;font-size:13px;color:var(--dim);">${esc(v.reasoning)}</p>`;
+  }
+  html += `</div>`;
+  div.innerHTML = html;
+}
+
+// ---- Utils ----
+function setBtnLoading(id, loading) {
+  const btn = document.getElementById(id);
+  btn.disabled = loading;
+  if (loading) {
+    btn.dataset.origText = btn.textContent;
+    btn.innerHTML = '<span class="spinner"></span> 处理中...';
+  } else {
+    btn.textContent = btn.dataset.origText || btn.textContent;
+  }
+}
+
+function copySpec() {
+  const text = document.getElementById('specText').textContent;
+  navigator.clipboard.writeText(text).then(() => alert('已复制'));
+}
+
+function exportTestcases() {
+  if (!currentTask || !currentTask.testcases) return;
+  const blob = new Blob([JSON.stringify(currentTask.testcases, null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `testcases_${currentTaskId}.json`;
+  a.click();
+}
+
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+init();
+</script>
+</body>
+</html>
