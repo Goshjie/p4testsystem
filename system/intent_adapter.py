@@ -82,7 +82,11 @@ def build_sagefuzz_config(task: SessionTask, case: ProgramCase) -> Any:
     )
     graphs_dir = root / "build" / "graphs"
     topo = Path(case.topology_path) if case.topology_path else root / "pod-topo" / "topology.json"
-    p4_source = _first_match(root, "solution", "*.p4") or _first_match(root, "", "*.p4")
+    p4_source = (
+        _first_match(root, "solution", "*.p4")
+        or _first_match(root, "p4src", "*.p4")
+        or _first_match(root, "", "*.p4")
+    )
 
     program = ProgramPaths(
         bmv2_json=Path(bmv2_json) if bmv2_json else root / "build" / "program.json",
