@@ -135,6 +135,20 @@
   .verdict-fail { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3); }
   .hidden { display: none; }
 
+  /* Status bar */
+  .status-bar {
+    margin-top: 10px; padding: 10px 14px; border-radius: var(--radius);
+    background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.2);
+    font-size: 13px; color: var(--dim);
+  }
+  .status-bar .status-icon { margin-right: 6px; }
+  .status-bar .status-time { float: right; font-family: monospace; font-size: 12px; color: var(--dim); }
+  .status-bar .status-steps { margin-top: 6px; font-size: 12px; line-height: 1.8; }
+  .status-bar .status-step { padding: 1px 0; }
+  .status-bar .status-step.done { color: var(--green); }
+  .status-bar .status-step.active { color: var(--accent); }
+  .status-bar .status-step.pending { color: var(--dim); }
+
   /* Advanced settings */
   .adv-toggle {
     font-size: 12px; color: var(--dim); cursor: pointer; margin-top: 12px;
@@ -248,6 +262,7 @@
       <div class="btn-group">
         <button class="btn btn-primary" id="btnGenSpec" onclick="generateSpec()">生成 P4LTL 规范</button>
       </div>
+      <div id="specStatus" class="status-bar hidden"></div>
     </div>
 
     <!-- Section 2: Spec -->
@@ -262,6 +277,7 @@
         <button class="btn btn-primary" id="btnGenTC" onclick="generateTestcases()">生成测试用例</button>
         <button class="btn btn-secondary btn-sm" onclick="copySpec()">复制规范</button>
       </div>
+      <div id="tcStatus" class="status-bar hidden"></div>
     </div>
 
     <!-- Section 3: Test Cases -->
@@ -396,6 +412,17 @@ async function generateSpec() {
   const agentTimeout = parseInt(document.getElementById('agentTimeout').value) || 45;
 
   setBtnLoading('btnGenSpec', true);
+  const specSteps = [
+    '加载 P4 程序上下文...',
+    '拆解测试意图特征...',
+    '生成候选 P4LTL 规范...',
+    '语法校验...',
+    '上下文校验...',
+    '语义评审...',
+    '多轮修正中...',
+  ];
+  const statusTimer = startStatusBar('specStatus', '正在生成 P4LTL 规范', specSteps, [3, 8, 20, 40, 55, 70, 100]);
+
   try {
     const resp = await fetch('/api/spec/generate', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -404,9 +431,12 @@ async function generateSpec() {
     const task = await resp.json();
     currentTaskId = task.task_id; currentTask = task;
     document.getElementById('taskIdDisplay').textContent = 'Task: ' + task.task_id;
+    stopStatusBar(statusTimer, 'specStatus', task.spec_generation_ok ? '规范生成完成' : '规范生成结束（未完全通过）');
     showSpecResult(task);
     loadHistory();
-  } catch (e) { alert('规范生成失败: ' + e.message); }
+  } catch (e) {
+    stopStatusBar(statusTimer, 'specStatus', '规范生成失败: ' + e.message, true);
+  }
   setBtnLoading('btnGenSpec', false);
 }
 
@@ -424,15 +454,31 @@ function showSpecResult(task) {
 async function generateTestcases() {
   if (!currentTaskId) return;
   setBtnLoading('btnGenTC', true);
+  const tcSteps = [
+    '初始化程序上下文...',
+    'Agent1: 语义分析...',
+    'Agent3: 语义完整性审查...',
+    'Agent2: 生成数据包序列...',
+    'Agent3: 审查数据包序列...',
+    'Agent4/5: 生成控制面规则...',
+    'Agent6: 生成 Oracle 预测...',
+    '校验与封装测试用例...',
+  ];
+  const statusTimer = startStatusBar('tcStatus', '正在生成测试用例', tcSteps, [3, 15, 30, 50, 65, 80, 90, 120]);
+
   try {
     const resp = await fetch('/api/testcase/generate', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ task_id: currentTaskId }),
     });
     currentTask = await resp.json();
+    const ok = currentTask.testcases && currentTask.testcases.length > 0;
+    stopStatusBar(statusTimer, 'tcStatus', ok ? `测试用例生成完成 (${currentTask.testcases.length} 个场景)` : '测试用例生成结束');
     showTestcases(currentTask);
     loadHistory();
-  } catch (e) { alert('测试用例生成失败: ' + e.message); }
+  } catch (e) {
+    stopStatusBar(statusTimer, 'tcStatus', '测试用例生成失败: ' + e.message, true);
+  }
   setBtnLoading('btnGenTC', false);
 }
 
@@ -558,6 +604,56 @@ function resetToNew() {
   document.getElementById('compileResult').classList.add('hidden');
   switchInputTab('preset');
   loadHistory();
+}
+
+// ---- Status bar ----
+function startStatusBar(barId, title, steps, thresholdsSec) {
+  const bar = document.getElementById(barId);
+  bar.classList.remove('hidden');
+  const startTime = Date.now();
+  let currentStep = 0;
+
+  function render() {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const ss = String(elapsed % 60).padStart(2, '0');
+
+    while (currentStep < thresholdsSec.length - 1 && elapsed >= thresholdsSec[currentStep + 1]) {
+      currentStep++;
+    }
+    if (elapsed >= thresholdsSec[currentStep] && currentStep < steps.length - 1) {
+      currentStep = Math.min(currentStep + 1, steps.length - 1);
+    }
+
+    let html = `<span class="status-icon"><span class="spinner"></span></span> <strong>${esc(title)}</strong>`;
+    html += `<span class="status-time">${mm}:${ss}</span>`;
+    html += `<div class="status-steps">`;
+    for (let i = 0; i < steps.length; i++) {
+      let cls = 'pending', icon = '○';
+      if (i < currentStep) { cls = 'done'; icon = '✓'; }
+      else if (i === currentStep) { cls = 'active'; icon = '▸'; }
+      html += `<div class="status-step ${cls}">${icon} ${esc(steps[i])}</div>`;
+    }
+    html += `</div>`;
+    bar.innerHTML = html;
+  }
+
+  render();
+  const intervalId = setInterval(render, 1000);
+  return { intervalId, startTime };
+}
+
+function stopStatusBar(timer, barId, message, isError) {
+  clearInterval(timer.intervalId);
+  const bar = document.getElementById(barId);
+  const elapsed = Math.floor((Date.now() - timer.startTime) / 1000);
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(elapsed % 60).padStart(2, '0');
+  const color = isError ? 'var(--red)' : 'var(--green)';
+  const icon = isError ? '✗' : '✓';
+  bar.innerHTML = `<span style="color:${color}">${icon}</span> <strong>${esc(message)}</strong> <span class="status-time">耗时 ${mm}:${ss}</span>`;
+  bar.style.borderColor = isError ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)';
+  bar.style.background = isError ? 'rgba(239,68,68,0.06)' : 'rgba(34,197,94,0.06)';
 }
 
 // ---- Utils ----
