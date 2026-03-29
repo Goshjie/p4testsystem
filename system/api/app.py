@@ -242,12 +242,14 @@ def generate_spec(req: SpecGenerateRequest):
 
     def _run():
         def _on_line(line):
-            msg = parse_progress_line(line)
+            msg = parse_progress_line(line, stage="规范生成")
             if msg:
                 try:
                     queue.put_nowait({"event": "progress", "data": {"message": msg}})
                 except Exception:
                     pass
+
+        queue.put_nowait({"event": "progress", "data": {"message": "[规范生成] 开始调用 P4LTL 规范构建管线..."}})
 
         with ProgressCapture(_on_line):
             try:
@@ -321,12 +323,14 @@ def generate_testcases(req: TestcaseGenerateRequest):
 
     def _run():
         def _on_line(line):
-            msg = parse_progress_line(line)
+            msg = parse_progress_line(line, stage="用例生成")
             if msg:
                 try:
                     queue.put_nowait({"event": "progress", "data": {"message": msg}})
                 except Exception:
                     pass
+
+        queue.put_nowait({"event": "progress", "data": {"message": "[用例生成] 开始调用 SageFuzz 测试用例生成管线..."}})
 
         with ProgressCapture(_on_line):
             try:
