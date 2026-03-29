@@ -115,6 +115,7 @@ class SessionOrchestrator:
     # ------------------------------------------------------------------
 
     def generate_testcases(self, task: SessionTask, case: ProgramCase) -> SessionTask:
+        import io
         import os
         from .intent_adapter import build_sagefuzz_config
         from sagefuzz_seedgen.workflow.packet_sequence_workflow import (
@@ -123,13 +124,22 @@ class SessionOrchestrator:
 
         cfg = build_sagefuzz_config(task, case)
 
-        # SageFuzz expects CWD to be its project root for relative path resolution
+        # SageFuzz prompts for interactive input (intent confirmation, test objective,
+        # Agent1 clarification questions).  Feed it enough empty lines so every
+        # _prompt_with_default() call gets an EOFError→default, and Agent1 question
+        # loops get the intent text as a fallback answer.
+        intent_lines = "\n".join([""] * 5 + [task.natural_language_intent] * 10 + [""] * 20)
+        fake_stdin = io.StringIO(intent_lines)
+
         prev_cwd = os.getcwd()
+        prev_stdin = sys.stdin
         os.chdir(str(_SAGEFUZZ_ROOT))
+        sys.stdin = fake_stdin
         try:
             index_path = run_packet_sequence_generation(cfg)
         finally:
             os.chdir(prev_cwd)
+            sys.stdin = prev_stdin
 
         # index_path may be relative to SageFuzz root
         if not index_path.is_absolute():
