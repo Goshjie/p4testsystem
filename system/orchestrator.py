@@ -28,6 +28,36 @@ for _p in (_P4LTL_LLM_ROOT, _SAGEFUZZ_ROOT):
         sys.path.insert(0, _s)
 
 
+def _patch_signal_timeout():
+    """Make P4LTL_LLM's signal-based timeout safe for non-main threads (e.g. uvicorn workers).
+
+    The original ``_TimeoutHandler`` uses ``signal.SIGALRM`` which only works
+    in the main thread.  This patch makes ``__enter__`` / ``__exit__`` no-ops
+    when called from a worker thread, so the pipeline runs without timeout
+    enforcement instead of crashing.
+    """
+    import threading
+    import signal as _signal
+
+    from P4LTL_LLM.pipeline import pipeline_protocol as _pp
+
+    _orig_enter = _pp._TimeoutHandler.__enter__
+    _orig_exit = _pp._TimeoutHandler.__exit__
+
+    def _safe_enter(self):
+        if threading.current_thread() is not threading.main_thread():
+            return
+        return _orig_enter(self)
+
+    def _safe_exit(self, exc_type, exc, tb):
+        if threading.current_thread() is not threading.main_thread():
+            return
+        return _orig_exit(self, exc_type, exc, tb)
+
+    _pp._TimeoutHandler.__enter__ = _safe_enter
+    _pp._TimeoutHandler.__exit__ = _safe_exit
+
+
 class SessionOrchestrator:
     """Orchestrates the end-to-end intent -> spec -> testcase pipeline."""
 
@@ -199,13 +229,15 @@ class SessionOrchestrator:
 
     def _get_pipeline(self) -> Any:
         if self._pipeline is None:
+            _patch_signal_timeout()
+
             from P4LTL_LLM.pipeline.pipeline_protocol import IntentToP4LTLPipeline
 
             self._pipeline = IntentToP4LTLPipeline(
                 use_agents=True,
                 allow_heuristic_fallback=False,
-                agent_timeout_seconds=30,
-                agent_max_retries=1,
+                agent_timeout_seconds=45,
+                agent_max_retries=2,
                 agent_retry_delay_seconds=2,
                 enable_learning=False,
                 enable_template_family_enhancement=True,
