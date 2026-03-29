@@ -35,7 +35,7 @@ for _p in (_P4LTL_LLM_ROOT, _SAGEFUZZ_ROOT):
 # P4LTL_LLM request builder
 # ---------------------------------------------------------------------------
 
-def build_p4ltl_request(task: SessionTask, case: ProgramCase) -> Any:
+def build_p4ltl_request(task: SessionTask, case: ProgramCase, *, max_rounds: int = 3) -> Any:
     """Build an ``IntentToP4LTLRequest`` for the P4LTL_LLM pipeline."""
     from P4LTL_LLM.pipeline.models import IntentToP4LTLRequest
 
@@ -47,7 +47,7 @@ def build_p4ltl_request(task: SessionTask, case: ProgramCase) -> Any:
         extra_constraints=case.extra_constraints,
         guide_path=case.guide_path or P4LTL_GUIDE_PATH,
         session_id=task.task_id,
-        max_rounds=3,
+        max_rounds=max_rounds,
     )
 
 

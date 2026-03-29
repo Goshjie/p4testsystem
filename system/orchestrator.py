@@ -83,11 +83,18 @@ class SessionOrchestrator:
     # Stage 1: Spec generation  (P4LTL_LLM)
     # ------------------------------------------------------------------
 
-    def generate_spec(self, task: SessionTask, case: ProgramCase) -> SessionTask:
+    def generate_spec(
+        self,
+        task: SessionTask,
+        case: ProgramCase,
+        *,
+        max_rounds: int = 3,
+        agent_timeout: int = 45,
+    ) -> SessionTask:
         from .intent_adapter import build_p4ltl_request
 
-        pipeline = self._get_pipeline()
-        request = build_p4ltl_request(task, case)
+        pipeline = self._get_pipeline(agent_timeout=agent_timeout)
+        request = build_p4ltl_request(task, case, max_rounds=max_rounds)
 
         try:
             result = pipeline.generate_and_validate(request)
@@ -227,21 +234,20 @@ class SessionOrchestrator:
     # Internals
     # ------------------------------------------------------------------
 
-    def _get_pipeline(self) -> Any:
-        if self._pipeline is None:
-            _patch_signal_timeout()
+    def _get_pipeline(self, *, agent_timeout: int = 45) -> Any:
+        _patch_signal_timeout()
 
-            from P4LTL_LLM.pipeline.pipeline_protocol import IntentToP4LTLPipeline
+        from P4LTL_LLM.pipeline.pipeline_protocol import IntentToP4LTLPipeline
 
-            self._pipeline = IntentToP4LTLPipeline(
-                use_agents=True,
-                allow_heuristic_fallback=False,
-                agent_timeout_seconds=45,
-                agent_max_retries=2,
-                agent_retry_delay_seconds=2,
-                enable_learning=False,
-                enable_template_family_enhancement=True,
-            )
+        self._pipeline = IntentToP4LTLPipeline(
+            use_agents=True,
+            allow_heuristic_fallback=False,
+            agent_timeout_seconds=agent_timeout,
+            agent_max_retries=2,
+            agent_retry_delay_seconds=2,
+            enable_learning=False,
+            enable_template_family_enhancement=True,
+        )
         return self._pipeline
 
     @staticmethod

@@ -105,6 +105,8 @@ def _persist_task(task: SessionTask, case: Optional[ProgramCase] = None):
 class SpecGenerateRequest(BaseModel):
     case_id: str
     intent_override: Optional[str] = None
+    max_rounds: int = 3
+    agent_timeout: int = 45
 
 
 class TestcaseGenerateRequest(BaseModel):
@@ -230,7 +232,11 @@ def generate_spec(req: SpecGenerateRequest):
     _task_cases[task.task_id] = case
 
     try:
-        task = orch.generate_spec(task, case)
+        task = orch.generate_spec(
+            task, case,
+            max_rounds=req.max_rounds,
+            agent_timeout=req.agent_timeout,
+        )
     except Exception as exc:
         task.spec_generation_ok = False
         task.spec_generation_detail = {"error": str(exc), "traceback": traceback.format_exc()}

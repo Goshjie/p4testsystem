@@ -135,6 +135,27 @@
   .verdict-fail { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3); }
   .hidden { display: none; }
 
+  /* Advanced settings */
+  .adv-toggle {
+    font-size: 12px; color: var(--dim); cursor: pointer; margin-top: 12px;
+    display: flex; align-items: center; gap: 4px; user-select: none;
+  }
+  .adv-toggle:hover { color: var(--text); }
+  .adv-toggle .arrow { transition: transform 0.2s; display: inline-block; }
+  .adv-toggle .arrow.open { transform: rotate(90deg); }
+  .adv-panel {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    margin-top: 8px; padding: 12px; background: var(--bg);
+    border: 1px solid var(--border); border-radius: var(--radius);
+  }
+  .adv-panel label { font-size: 12px; color: var(--dim); }
+  .adv-panel input[type="number"] {
+    width: 100%; padding: 6px 10px; border-radius: var(--radius);
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    font-size: 13px;
+  }
+  .adv-panel input[type="number"]:focus { outline: none; border-color: var(--accent); }
+
   /* Tabs */
   .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
   .tab { padding: 8px 16px; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--dim); }
@@ -209,6 +230,21 @@
         </div>
       </div>
 
+      <!-- Advanced settings -->
+      <div class="adv-toggle" onclick="toggleAdvanced()">
+        <span class="arrow" id="advArrow">▶</span> 高级设置
+      </div>
+      <div id="advPanel" class="adv-panel hidden">
+        <div>
+          <label>最大重试轮数</label>
+          <input type="number" id="maxRounds" value="3" min="1" max="10">
+        </div>
+        <div>
+          <label>Agent 超时 (秒)</label>
+          <input type="number" id="agentTimeout" value="45" min="10" max="300">
+        </div>
+      </div>
+
       <div class="btn-group">
         <button class="btn btn-primary" id="btnGenSpec" onclick="generateSpec()">生成 P4LTL 规范</button>
       </div>
@@ -269,6 +305,14 @@ async function init() {
     if (opt && opt.dataset.intent) document.getElementById('intentText').value = opt.dataset.intent;
   };
   loadHistory();
+}
+
+// ---- Advanced settings ----
+function toggleAdvanced() {
+  const panel = document.getElementById('advPanel');
+  const arrow = document.getElementById('advArrow');
+  panel.classList.toggle('hidden');
+  arrow.classList.toggle('open');
 }
 
 // ---- Input tabs ----
@@ -348,11 +392,14 @@ async function generateSpec() {
     if (!caseId) { alert('请先选择测试用例'); return; }
   }
 
+  const maxRounds = parseInt(document.getElementById('maxRounds').value) || 3;
+  const agentTimeout = parseInt(document.getElementById('agentTimeout').value) || 45;
+
   setBtnLoading('btnGenSpec', true);
   try {
     const resp = await fetch('/api/spec/generate', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ case_id: caseId, intent_override: intent }),
+      body: JSON.stringify({ case_id: caseId, intent_override: intent, max_rounds: maxRounds, agent_timeout: agentTimeout }),
     });
     const task = await resp.json();
     currentTaskId = task.task_id; currentTask = task;
