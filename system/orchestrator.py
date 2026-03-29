@@ -92,6 +92,96 @@ class SessionOrchestrator:
         return task
 
     # ------------------------------------------------------------------
+    # Stage 3+4: Auto test execution + result judgement  (LLM Agent)
+    # ------------------------------------------------------------------
+
+    def run_auto_test(
+        self,
+        task: SessionTask,
+        *,
+        on_step: Optional[Any] = None,
+    ) -> SessionTask:
+        """Execute test cases on the remote BMv2/Mininet environment and judge results.
+
+        Parameters
+        ----------
+        task : SessionTask
+            Must have ``testcases`` populated from Stage 2.
+        on_step : callable, optional
+            ``fn(StepLog)`` callback for real-time progress reporting.
+        """
+        from .agent.test_agent import TestAgent
+        from .agent.judge import ResultJudge
+        from .models import AgentStepLog, TestObservations, TestVerdict, PacketVerdict
+
+        if not task.testcases:
+            task.test_execution_status = "failed"
+            return task
+
+        task.test_execution_status = "running"
+        agent = TestAgent()
+
+        # Execute each test case scenario
+        all_observations: dict[str, Any] = {}
+        all_step_logs: list[AgentStepLog] = []
+
+        for i, tc in enumerate(task.testcases):
+            scenario = tc.get("meta", {}).get("scenario", f"scenario_{i}")
+            sub_task_id = f"{task.task_id}_{scenario}"
+
+            def _on_step_wrapper(step):
+                log = AgentStepLog(
+                    step_id=step.step_id,
+                    phase=step.phase,
+                    thought=step.thought,
+                    action=step.action,
+                    action_input=step.action_input,
+                    observation=step.observation,
+                )
+                all_step_logs.append(log)
+                if on_step:
+                    on_step(step)
+
+            result = agent.execute_testcase(
+                task_id=sub_task_id,
+                testcase=tc,
+                program_name=task.p4_program_name,
+                on_step=_on_step_wrapper,
+            )
+            all_observations[scenario] = result.observations
+
+        task.test_execution_log = all_step_logs
+        task.test_observations = TestObservations(
+            raw_outputs=[json.dumps(all_observations, ensure_ascii=False)]
+        )
+
+        # Judge results
+        judge = ResultJudge()
+        for i, tc in enumerate(task.testcases):
+            oracle = tc.get("oracle_prediction", {})
+            scenario = tc.get("meta", {}).get("scenario", f"scenario_{i}")
+            obs = all_observations.get(scenario, {})
+            if oracle and obs:
+                verdict_dict = judge.judge(
+                    intent=task.natural_language_intent,
+                    ltl_spec=task.ltl_spec_text,
+                    oracle_prediction=oracle,
+                    observations=obs,
+                )
+                task.test_verdict = TestVerdict(
+                    overall=verdict_dict.get("overall", "INCONCLUSIVE"),
+                    per_packet=[
+                        PacketVerdict(**pv) for pv in verdict_dict.get("per_packet", [])
+                        if isinstance(pv, dict)
+                    ],
+                    reasoning=verdict_dict.get("reasoning", ""),
+                    evidence=verdict_dict.get("evidence", []),
+                )
+
+        task.test_execution_status = "completed"
+        return task
+
+    # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
 

@@ -202,6 +202,47 @@ def _display_testcases(task) -> None:
         print()
 
 
+def _display_auto_test_step(step) -> None:
+    """Display a single agent step in real time."""
+    phase_icon = {"prepare": "🔧", "execute": "▶", "observe": "👁", "complete": "✓"}.get(step.phase, "·")
+    action_desc = step.action or step.thought[:60]
+    status_color = GREEN if step.status == "done" else (RED if step.status == "error" else YELLOW)
+    print(f"  {DIM}[{step.step_id:>2}]{RESET} {phase_icon} {action_desc:<50} {status_color}{step.status}{RESET}")
+
+
+def _display_verdict(task) -> None:
+    """Display Stage 3+4 result: test execution and verdict."""
+    _header("自动测试结果", "Stage 3+4")
+    print()
+
+    if task.test_execution_status == "completed" and task.test_verdict:
+        verdict = task.test_verdict
+        color = GREEN if verdict.overall == "PASS" else (RED if verdict.overall == "FAIL" else YELLOW)
+        print(f"  {BOLD}测试结论: {color}{verdict.overall}{RESET}")
+        print()
+
+        if verdict.per_packet:
+            print(f"  {DIM}逐包判定:{RESET}")
+            for pv in verdict.per_packet:
+                match_icon = f"{GREEN}✓{RESET}" if pv.match else f"{RED}✗{RESET}"
+                print(f"    Packet #{pv.packet_id}: 预期 {pv.expected_outcome} → 实际 {pv.actual_outcome}  {match_icon}")
+            print()
+
+        if verdict.reasoning:
+            _kv("判定推理", verdict.reasoning)
+            print()
+
+        if verdict.evidence:
+            print(f"  {DIM}关键证据:{RESET}")
+            for ev in verdict.evidence[:5]:
+                print(f"    • {ev}")
+            print()
+    elif task.test_execution_status == "failed":
+        _error("自动测试执行失败")
+    else:
+        _warn(f"测试状态: {task.test_execution_status or 'unknown'}")
+
+
 def _display_summary(task) -> None:
     """Final summary tying everything together."""
     _header("任务总览", "Summary")
@@ -214,6 +255,13 @@ def _display_summary(task) -> None:
     print()
     tc_count = len(task.testcases) if task.testcases else 0
     _kv("测试用例", f"{tc_count} 个场景")
+
+    if task.test_verdict:
+        verdict = task.test_verdict
+        color = GREEN if verdict.overall == "PASS" else (RED if verdict.overall == "FAIL" else YELLOW)
+        print()
+        _kv("测试结论", f"{color}{verdict.overall}{RESET}")
+
     print()
     print(f"{BOLD}{CYAN}{SEPARATOR}{RESET}")
 
@@ -224,6 +272,7 @@ def _parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="意图驱动的 P4 测试系统 CLI")
     ap.add_argument("--case-id", default=None, help="直接指定 case_id，跳过交互选择")
     ap.add_argument("--spec-only", action="store_true", help="仅生成规范，不生成测试用例")
+    ap.add_argument("--auto-test", action="store_true", help="生成测试用例后自动执行测试")
     ap.add_argument("--no-confirm", action="store_true", help="跳过确认提示，自动继续")
     return ap.parse_args()
 
@@ -294,6 +343,33 @@ def main() -> int:
         _error(f"测试用例生成失败: {exc}")
         import traceback
         traceback.print_exc()
+        _display_summary(task)
+        return 1
+
+    # Stage 3+4: Auto test (optional)
+    run_test = args.auto_test
+    if not run_test and not args.no_confirm and task.testcases:
+        print()
+        try:
+            answer = input("  是否执行自动测试？[y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            _display_summary(task)
+            return 0
+        run_test = answer == "y"
+
+    if run_test and task.testcases:
+        _header("正在执行自动测试...", "Stage 3+4")
+        print(f"  {DIM}LLM Test Agent 正在远程环境中执行测试用例 ...{RESET}")
+        print()
+
+        try:
+            task = orch.run_auto_test(task, on_step=_display_auto_test_step)
+            _display_verdict(task)
+        except Exception as exc:
+            _error(f"自动测试失败: {exc}")
+            import traceback
+            traceback.print_exc()
 
     _display_summary(task)
     return 0
