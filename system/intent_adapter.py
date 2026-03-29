@@ -67,9 +67,19 @@ def build_sagefuzz_config(task: SessionTask, case: ProgramCase) -> Any:
     )
 
     root = Path(case.root_dir)
+    prog_stem = case.program_name.lower().replace("-", "_")
 
-    bmv2_json = _first_match(root, "build", "*.json")
-    p4info = _first_match(root, "build", "*.p4.p4info.txtpb") or _first_match(root, "build", "*.txtpb")
+    bmv2_json = (
+        _first_match(root, "build", f"{prog_stem}.json")
+        or _first_match(root, "build", "*.json")
+    )
+    p4info = (
+        _first_match(root, "build", f"{prog_stem}.p4.p4info.txtpb")
+        or _first_match(root, "build", f"{prog_stem}.p4.p4info.txt")
+        or _first_match(root, "build", "*.p4.p4info.txtpb")
+        or _first_match(root, "build", "*.p4.p4info.txt")
+        or _first_match(root, "build", "*.txtpb")
+    )
     graphs_dir = root / "build" / "graphs"
     topo = Path(case.topology_path) if case.topology_path else root / "pod-topo" / "topology.json"
     p4_source = _first_match(root, "solution", "*.p4") or _first_match(root, "", "*.p4")
@@ -92,7 +102,7 @@ def build_sagefuzz_config(task: SessionTask, case: ProgramCase) -> Any:
             "test_objective": "data_plane_behavior",
         }
 
-    model = ModelConfig.from_env()
+    model = _load_model_config()
 
     return RunConfig(
         program=program,
@@ -105,6 +115,24 @@ def build_sagefuzz_config(task: SessionTask, case: ProgramCase) -> Any:
         out_path=None,
         session_state_path=None,
     )
+
+
+def _load_model_config():
+    """Load the LLM model config from P4LTL_LLM's api_config.json (unified API)."""
+    import json as _json
+    from sagefuzz_seedgen.config import ModelConfig
+
+    p4ltl_cfg = _P4LTL_LLM_ROOT / "P4LTL_LLM" / "config" / "api_config.json"
+    if p4ltl_cfg.exists():
+        with p4ltl_cfg.open() as f:
+            cfg = _json.load(f)
+        return ModelConfig(
+            model_id=cfg.get("model_id", "glm-5"),
+            api_key=cfg.get("api_key", ""),
+            base_url=cfg.get("base_url", "https://coding.dashscope.aliyuncs.com/v1"),
+        )
+
+    return ModelConfig.from_env()
 
 
 def _first_match(root: Path, subdir: str, pattern: str) -> str | None:

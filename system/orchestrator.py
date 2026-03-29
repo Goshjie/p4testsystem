@@ -78,13 +78,25 @@ class SessionOrchestrator:
     # ------------------------------------------------------------------
 
     def generate_testcases(self, task: SessionTask, case: ProgramCase) -> SessionTask:
+        import os
         from .intent_adapter import build_sagefuzz_config
         from sagefuzz_seedgen.workflow.packet_sequence_workflow import (
             run_packet_sequence_generation,
         )
 
         cfg = build_sagefuzz_config(task, case)
-        index_path = run_packet_sequence_generation(cfg)
+
+        # SageFuzz expects CWD to be its project root for relative path resolution
+        prev_cwd = os.getcwd()
+        os.chdir(str(_SAGEFUZZ_ROOT))
+        try:
+            index_path = run_packet_sequence_generation(cfg)
+        finally:
+            os.chdir(prev_cwd)
+
+        # index_path may be relative to SageFuzz root
+        if not index_path.is_absolute():
+            index_path = _SAGEFUZZ_ROOT / index_path
 
         task.testcase_run_id = index_path.stem.replace("_packet_sequence_index", "")
         task.testcases = self._load_testcases(index_path)
