@@ -143,7 +143,7 @@
   }
   .status-bar .status-icon { margin-right: 6px; }
   .status-bar .status-time { float: right; font-family: monospace; font-size: 12px; color: var(--dim); }
-  .status-bar .status-steps { margin-top: 6px; font-size: 12px; line-height: 1.8; }
+  .status-bar .status-steps { margin-top: 6px; font-size: 12px; line-height: 1.8; max-height: 200px; overflow-y: auto; }
   .status-bar .status-step { padding: 1px 0; }
   .status-bar .status-step.done { color: var(--green); }
   .status-bar .status-step.active { color: var(--accent); }
@@ -412,30 +412,23 @@ async function generateSpec() {
   const agentTimeout = parseInt(document.getElementById('agentTimeout').value) || 45;
 
   setBtnLoading('btnGenSpec', true);
-  const specSteps = [
-    '加载 P4 程序上下文...',
-    '拆解测试意图特征...',
-    '生成候选 P4LTL 规范...',
-    '语法校验...',
-    '上下文校验...',
-    '语义评审...',
-    '多轮修正中...',
-  ];
-  const statusTimer = startStatusBar('specStatus', '正在生成 P4LTL 规范', specSteps, [3, 8, 20, 40, 55, 70, 100]);
+  initLiveStatus('specStatus', '正在生成 P4LTL 规范');
 
   try {
     const resp = await fetch('/api/spec/generate', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ case_id: caseId, intent_override: intent, max_rounds: maxRounds, agent_timeout: agentTimeout }),
     });
-    const task = await resp.json();
-    currentTaskId = task.task_id; currentTask = task;
-    document.getElementById('taskIdDisplay').textContent = 'Task: ' + task.task_id;
-    stopStatusBar(statusTimer, 'specStatus', task.spec_generation_ok ? '规范生成完成' : '规范生成结束（未完全通过）');
+    const startData = await resp.json();
+    currentTaskId = startData.task_id;
+    document.getElementById('taskIdDisplay').textContent = 'Task: ' + startData.task_id;
+
+    const task = await waitForSSE(startData.task_id, 'specStatus');
+    currentTask = task;
     showSpecResult(task);
     loadHistory();
   } catch (e) {
-    stopStatusBar(statusTimer, 'specStatus', '规范生成失败: ' + e.message, true);
+    finishLiveStatus('specStatus', '规范生成失败: ' + e.message, true);
   }
   setBtnLoading('btnGenSpec', false);
 }
@@ -454,30 +447,22 @@ function showSpecResult(task) {
 async function generateTestcases() {
   if (!currentTaskId) return;
   setBtnLoading('btnGenTC', true);
-  const tcSteps = [
-    '初始化程序上下文...',
-    'Agent1: 语义分析...',
-    'Agent3: 语义完整性审查...',
-    'Agent2: 生成数据包序列...',
-    'Agent3: 审查数据包序列...',
-    'Agent4/5: 生成控制面规则...',
-    'Agent6: 生成 Oracle 预测...',
-    '校验与封装测试用例...',
-  ];
-  const statusTimer = startStatusBar('tcStatus', '正在生成测试用例', tcSteps, [3, 15, 30, 50, 65, 80, 90, 120]);
+  initLiveStatus('tcStatus', '正在生成测试用例');
 
   try {
     const resp = await fetch('/api/testcase/generate', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ task_id: currentTaskId }),
     });
-    currentTask = await resp.json();
-    const ok = currentTask.testcases && currentTask.testcases.length > 0;
-    stopStatusBar(statusTimer, 'tcStatus', ok ? `测试用例生成完成 (${currentTask.testcases.length} 个场景)` : '测试用例生成结束');
-    showTestcases(currentTask);
+    const startData = await resp.json();
+
+    const task = await waitForSSE(startData.task_id, 'tcStatus');
+    currentTask = task;
+    const ok = task.testcases && task.testcases.length > 0;
+    showTestcases(task);
     loadHistory();
   } catch (e) {
-    stopStatusBar(statusTimer, 'tcStatus', '测试用例生成失败: ' + e.message, true);
+    finishLiveStatus('tcStatus', '测试用例生成失败: ' + e.message, true);
   }
   setBtnLoading('btnGenTC', false);
 }
@@ -606,54 +591,92 @@ function resetToNew() {
   loadHistory();
 }
 
-// ---- Status bar ----
-function startStatusBar(barId, title, steps, thresholdsSec) {
+// ---- Live status bar (SSE-based) ----
+let _statusTimers = {};
+
+function initLiveStatus(barId, title) {
   const bar = document.getElementById(barId);
   bar.classList.remove('hidden');
+  bar.style.borderColor = 'rgba(99,102,241,0.2)';
+  bar.style.background = 'rgba(99,102,241,0.06)';
   const startTime = Date.now();
-  let currentStep = 0;
+  _statusTimers[barId] = startTime;
 
-  function render() {
+  bar.innerHTML = `<span class="status-icon"><span class="spinner"></span></span> <strong>${esc(title)}</strong><span class="status-time" id="${barId}_time">00:00</span><div class="status-steps" id="${barId}_steps"></div>`;
+
+  // Elapsed timer
+  const timerId = setInterval(() => {
+    const el = document.getElementById(barId + '_time');
+    if (!el) { clearInterval(timerId); return; }
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
-    const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
-    const ss = String(elapsed % 60).padStart(2, '0');
-
-    while (currentStep < thresholdsSec.length - 1 && elapsed >= thresholdsSec[currentStep + 1]) {
-      currentStep++;
-    }
-    if (elapsed >= thresholdsSec[currentStep] && currentStep < steps.length - 1) {
-      currentStep = Math.min(currentStep + 1, steps.length - 1);
-    }
-
-    let html = `<span class="status-icon"><span class="spinner"></span></span> <strong>${esc(title)}</strong>`;
-    html += `<span class="status-time">${mm}:${ss}</span>`;
-    html += `<div class="status-steps">`;
-    for (let i = 0; i < steps.length; i++) {
-      let cls = 'pending', icon = '○';
-      if (i < currentStep) { cls = 'done'; icon = '✓'; }
-      else if (i === currentStep) { cls = 'active'; icon = '▸'; }
-      html += `<div class="status-step ${cls}">${icon} ${esc(steps[i])}</div>`;
-    }
-    html += `</div>`;
-    bar.innerHTML = html;
-  }
-
-  render();
-  const intervalId = setInterval(render, 1000);
-  return { intervalId, startTime };
+    el.textContent = String(Math.floor(elapsed/60)).padStart(2,'0') + ':' + String(elapsed%60).padStart(2,'0');
+  }, 1000);
+  _statusTimers[barId + '_interval'] = timerId;
 }
 
-function stopStatusBar(timer, barId, message, isError) {
-  clearInterval(timer.intervalId);
+function appendLiveStep(barId, message) {
+  const stepsDiv = document.getElementById(barId + '_steps');
+  if (!stepsDiv) return;
+  // Mark previous active as done
+  const prev = stepsDiv.querySelector('.status-step.active');
+  if (prev) { prev.classList.remove('active'); prev.classList.add('done'); prev.innerHTML = '✓ ' + prev.textContent.substring(2); }
+  // Add new active
+  const step = document.createElement('div');
+  step.className = 'status-step active';
+  step.textContent = '▸ ' + message;
+  stepsDiv.appendChild(step);
+  stepsDiv.scrollTop = stepsDiv.scrollHeight;
+}
+
+function finishLiveStatus(barId, message, isError) {
+  clearInterval(_statusTimers[barId + '_interval']);
   const bar = document.getElementById(barId);
-  const elapsed = Math.floor((Date.now() - timer.startTime) / 1000);
-  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
-  const ss = String(elapsed % 60).padStart(2, '0');
+  if (!bar) return;
+  const startTime = _statusTimers[barId] || Date.now();
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const mm = String(Math.floor(elapsed/60)).padStart(2,'0');
+  const ss = String(elapsed%60).padStart(2,'0');
   const color = isError ? 'var(--red)' : 'var(--green)';
   const icon = isError ? '✗' : '✓';
-  bar.innerHTML = `<span style="color:${color}">${icon}</span> <strong>${esc(message)}</strong> <span class="status-time">耗时 ${mm}:${ss}</span>`;
+
+  // Mark last active step as done
+  const stepsDiv = document.getElementById(barId + '_steps');
+  if (stepsDiv) {
+    const last = stepsDiv.querySelector('.status-step.active');
+    if (last) { last.classList.remove('active'); last.classList.add('done'); last.innerHTML = '✓ ' + last.textContent.substring(2); }
+  }
+
+  // Update header
+  const header = bar.querySelector('strong');
+  if (header) header.innerHTML = `<span style="color:${color}">${icon}</span> ${esc(message)}`;
+  const spinnerEl = bar.querySelector('.spinner');
+  if (spinnerEl) spinnerEl.remove();
+  const timeEl = document.getElementById(barId + '_time');
+  if (timeEl) timeEl.textContent = '耗时 ' + mm + ':' + ss;
   bar.style.borderColor = isError ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)';
   bar.style.background = isError ? 'rgba(239,68,68,0.06)' : 'rgba(34,197,94,0.06)';
+}
+
+function waitForSSE(taskId, barId) {
+  return new Promise((resolve, reject) => {
+    const es = new EventSource(`/api/progress/${taskId}`);
+    es.addEventListener('progress', (e) => {
+      const data = JSON.parse(e.data);
+      appendLiveStep(barId, data.message);
+    });
+    es.addEventListener('complete', (e) => {
+      es.close();
+      const task = JSON.parse(e.data);
+      const ok = task.spec_generation_ok !== false && (task.testcases === null || (task.testcases && task.testcases.length > 0));
+      finishLiveStatus(barId, ok ? '完成' : '已结束', !ok);
+      resolve(task);
+    });
+    es.addEventListener('error', (e) => {
+      es.close();
+      finishLiveStatus(barId, '连接中断', true);
+      reject(new Error('SSE connection lost'));
+    });
+  });
 }
 
 // ---- Utils ----

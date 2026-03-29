@@ -51,6 +51,7 @@ remote = RemoteTools()
 _tasks: dict[str, SessionTask] = {}
 _task_cases: dict[str, ProgramCase] = {}
 _test_events: dict[str, asyncio.Queue] = {}
+_progress_queues: dict[str, asyncio.Queue] = {}
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 HISTORY_DIR = Path(__file__).resolve().parents[2] / "data" / "history"
@@ -216,6 +217,8 @@ async def upload_and_compile(
 
 @app.post("/api/spec/generate")
 def generate_spec(req: SpecGenerateRequest):
+    """Start spec generation. Returns task_id immediately.
+    Subscribe to /api/progress/{task_id} for real-time progress via SSE."""
     case = get_case_by_id(req.case_id)
 
     if not case and req.case_id.startswith("upload:"):
@@ -231,19 +234,39 @@ def generate_spec(req: SpecGenerateRequest):
     _tasks[task.task_id] = task
     _task_cases[task.task_id] = case
 
-    try:
-        task = orch.generate_spec(
-            task, case,
-            max_rounds=req.max_rounds,
-            agent_timeout=req.agent_timeout,
-        )
-    except Exception as exc:
-        task.spec_generation_ok = False
-        task.spec_generation_detail = {"error": str(exc), "traceback": traceback.format_exc()}
+    queue: asyncio.Queue = asyncio.Queue()
+    _progress_queues[task.task_id] = queue
 
-    _tasks[task.task_id] = task
-    _persist_task(task, case)
-    return _task_to_dict(task)
+    import threading
+    from .progress_capture import ProgressCapture, parse_progress_line
+
+    def _run():
+        def _on_line(line):
+            msg = parse_progress_line(line)
+            if msg:
+                try:
+                    queue.put_nowait({"event": "progress", "data": {"message": msg}})
+                except Exception:
+                    pass
+
+        with ProgressCapture(_on_line):
+            try:
+                nonlocal task
+                task = orch.generate_spec(
+                    task, case,
+                    max_rounds=req.max_rounds,
+                    agent_timeout=req.agent_timeout,
+                )
+            except Exception as exc:
+                task.spec_generation_ok = False
+                task.spec_generation_detail = {"error": str(exc), "traceback": traceback.format_exc()}
+
+        _tasks[task.task_id] = task
+        _persist_task(task, case)
+        queue.put_nowait({"event": "complete", "data": _task_to_dict(task)})
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"task_id": task.task_id, "status": "started"}
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +304,8 @@ def list_programs():
 
 @app.post("/api/testcase/generate")
 def generate_testcases(req: TestcaseGenerateRequest):
+    """Start testcase generation. Returns immediately.
+    Subscribe to /api/progress/{task_id} for real-time progress via SSE."""
     task = _tasks.get(req.task_id)
     if not task:
         raise HTTPException(404, f"Task not found: {req.task_id}")
@@ -288,14 +313,34 @@ def generate_testcases(req: TestcaseGenerateRequest):
     if not case:
         raise HTTPException(400, "No case associated with this task")
 
-    try:
-        task = orch.generate_testcases(task, case)
-    except Exception as exc:
-        task.testcases = []
+    queue: asyncio.Queue = asyncio.Queue()
+    _progress_queues[task.task_id] = queue
 
-    _tasks[task.task_id] = task
-    _persist_task(task, case)
-    return _task_to_dict(task)
+    import threading
+    from .progress_capture import ProgressCapture, parse_progress_line
+
+    def _run():
+        def _on_line(line):
+            msg = parse_progress_line(line)
+            if msg:
+                try:
+                    queue.put_nowait({"event": "progress", "data": {"message": msg}})
+                except Exception:
+                    pass
+
+        with ProgressCapture(_on_line):
+            try:
+                nonlocal task
+                task = orch.generate_testcases(task, case)
+            except Exception as exc:
+                task.testcases = []
+
+        _tasks[task.task_id] = task
+        _persist_task(task, case)
+        queue.put_nowait({"event": "complete", "data": _task_to_dict(task)})
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"task_id": task.task_id, "status": "started"}
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +376,29 @@ async def run_auto_test(req: AutoTestRequest):
 
     asyncio.get_event_loop().run_in_executor(None, lambda: asyncio.run(_run()))
     return {"status": "started", "task_id": req.task_id}
+
+
+@app.get("/api/progress/{task_id}")
+async def stream_progress(task_id: str):
+    """SSE stream for spec/testcase generation progress (real backend output)."""
+    queue = _progress_queues.get(task_id)
+    if not queue:
+        raise HTTPException(404, "No active generation for this task")
+
+    async def event_generator():
+        while True:
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=600)
+                yield {
+                    "event": msg["event"],
+                    "data": json.dumps(msg["data"], ensure_ascii=False),
+                }
+                if msg["event"] in ("complete", "error"):
+                    break
+            except asyncio.TimeoutError:
+                yield {"event": "ping", "data": "keepalive"}
+
+    return EventSourceResponse(event_generator())
 
 
 @app.get("/api/test/stream/{task_id}")
